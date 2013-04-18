@@ -1,3 +1,5 @@
+// import.cpp
+
 /**
 *    Copyright (C) 2008 10gen Inc.
 *
@@ -14,18 +16,16 @@
 *    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "mongo/pch.h"
-
-#include <boost/algorithm/string.hpp>
-#include <boost/filesystem/operations.hpp>
-#include <boost/program_options.hpp>
+#include "pch.h"
+#include "db/json.h"
+#include "tool.h"
+#include "../util/text.h"
+#include "mongo/base/initializer.h"
 #include <fstream>
 #include <iostream>
-
-#include "mongo/base/initializer.h"
-#include "mongo/db/json.h"
-#include "mongo/tools/tool.h"
-#include "mongo/util/text.h"
+#include <boost/program_options.hpp>
+#include <boost/algorithm/string.hpp>
+#include <boost/filesystem/operations.hpp>
 
 using namespace mongo;
 using std::string;
@@ -267,19 +267,20 @@ public:
     Import() : Tool( "import" ) {
         addFieldOptions();
         add_options()
-        ("ignoreBlanks","if given, empty fields in csv and tsv will be ignored")
-        ("type",po::value<string>() , "type of file to import.  default: json (json,csv,tsv)")
-        ("file",po::value<string>() , "file to import from; if not specified stdin is used" )
-        ("drop", "drop collection first " )
-        ("headerline","first line in input file is a header (CSV and TSV only)")
-        ("upsert", "insert or update objects that already exist" )
-        ("upsertFields", po::value<string>(), "comma-separated fields for the query part of the upsert. You should make sure this is indexed" )
-        ("stopOnError", "stop importing at first error rather than continuing" )
-        ("jsonArray", "load a json array, not one item per line. Currently limited to 16MB." )
-        ;
+	  ("ignoreBlanks","if given, empty fields in csv and tsv will be ignored")
+	  ("type",po::value<string>() , "type of file to import.  default: json (json,csv,tsv)")
+	  ("s",po::value<string>(), "separator.  defaults: csv :',', tsv:'\t'")
+	  ("file",po::value<string>() , "file to import from; if not specified stdin is used" )
+	  ("drop", "drop collection first " )
+	  ("headerline","first line in input file is a header (CSV and TSV only)")
+	  ("upsert", "insert or update objects that already exist" )
+	  ("upsertFields", po::value<string>(), "comma-separated fields for the query part of the upsert. You should make sure this is indexed" )
+	  ("stopOnError", "stop importing at first error rather than continuing" )
+	  ("jsonArray", "load a json array, not one item per line. Currently limited to 16MB." )
+	  ;
         add_hidden_options()
-        ("noimport", "don't actually import. useful for benchmarking parser" )
-        ;
+	  ("noimport", "don't actually import. useful for benchmarking parser" )
+	  ;
         addPositionArg( "file" , 1 );
         _type = JSON;
         _ignoreBlanks = false;
@@ -288,7 +289,7 @@ public:
         _doimport = true;
         _jsonArray = false;
     }
-    ;
+  ;
     virtual void printExtraHelp( ostream & out ) {
         out << "Import CSV, TSV or JSON data into MongoDB.\n" << endl;
         out << "When importing JSON documents, each document must be a separate line of the input file.\n";
@@ -351,6 +352,8 @@ public:
 
         LOG(1) << "ns: " << ns << endl;
 
+        auth();
+
         if ( hasParam( "drop" ) ) {
             log() << "dropping: " << ns << endl;
             conn().dropCollection( ns.c_str() );
@@ -378,22 +381,23 @@ public:
 
         if ( hasParam( "type" ) ) {
             string type = getParam( "type" );
+	    bool sep = hasParam("s");
             if ( type == "json" )
-                _type = JSON;
-            else if ( type == "csv" ) {
-                _type = CSV;
-                _sep = ",";
+	      _type = JSON;
+	    else if ( type == "csv" ) {
+	      _type = CSV;
+	      _sep = sep ? getParam("s").c_str() : ",";
             }
             else if ( type == "tsv" ) {
-                _type = TSV;
-                _sep = "\t";
+	      _type = TSV;
+	      _sep = sep ? getParam("s").c_str() : "\t";
             }
             else {
-                error() << "don't know what type [" << type << "] is" << endl;
-                return -1;
+	      error() << "don't know what type [" << type << "] is" << endl;
+	      return -1;
             }
         }
-
+	
         if ( _type == CSV || _type == TSV ) {
             _headerLine = hasParam( "headerline" );
             if ( _headerLine ) {
@@ -512,28 +516,10 @@ public:
     }
 };
 
-const int Import::BUF_SIZE(1024 * 1024 * 16);
-
-int toolMain( int argc , char ** argv, char** envp ) {
+int main( int argc , char ** argv, char** envp ) {
     mongo::runGlobalInitializersOrDie(argc, argv, envp);
     Import import;
     return import.main( argc , argv );
 }
 
-#if defined(_WIN32)
-// In Windows, wmain() is an alternate entry point for main(), and receives the same parameters
-// as main() but encoded in Windows Unicode (UTF-16); "wide" 16-bit wchar_t characters.  The
-// WindowsCommandLine object converts these wide character strings to a UTF-8 coded equivalent
-// and makes them available through the argv() and envp() members.  This enables toolMain()
-// to process UTF-8 encoded arguments and environment variables without regard to platform.
-int wmain(int argc, wchar_t* argvW[], wchar_t* envpW[]) {
-    WindowsCommandLine wcl(argc, argvW, envpW);
-    int exitCode = toolMain(argc, wcl.argv(), wcl.envp());
-    ::_exit(exitCode);
-}
-#else
-int main(int argc, char* argv[], char** envp) {
-    int exitCode = toolMain(argc, argv, envp);
-    ::_exit(exitCode);
-}
-#endif
+const int Import::BUF_SIZE(1024 * 1024 * 16);

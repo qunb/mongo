@@ -1,3 +1,5 @@
+// export.cpp
+
 /**
 *    Copyright (C) 2008 10gen Inc.
 *
@@ -14,19 +16,19 @@
 *    along with this program.  If not, see <http://www.gnu.org/licenses/>.
 */
 
-#include "mongo/pch.h"
+#include "pch.h"
+#include "db/json.h"
+#include "mongo/base/initializer.h"
+#include "mongo/client/dbclientcursor.h"
+
+#include "tool.h"
+
+#include <fstream>
+#include <iostream>
 
 #include <boost/filesystem/convenience.hpp>
 #include <boost/filesystem/operations.hpp>
 #include <boost/program_options.hpp>
-#include <fstream>
-#include <iostream>
-
-#include "mongo/base/initializer.h"
-#include "mongo/client/dbclientcursor.h"
-#include "mongo/db/json.h"
-#include "mongo/tools/tool.h"
-#include "mongo/util/text.h"
 
 using namespace mongo;
 
@@ -37,13 +39,15 @@ public:
     Export() : Tool( "export" ) {
         addFieldOptions();
         add_options()
-        ("query,q" , po::value<string>() , "query filter, as a JSON string" )
-        ("csv","export to csv instead of json")
-        ("out,o", po::value<string>(), "output file; if not specified, stdout is used")
-        ("jsonArray", "output to a json array rather than one object per line")
-        ("slaveOk,k", po::value<bool>()->default_value(true) , "use secondaries for export if available, default true")
-        ("forceTableScan", "force a table scan (do not use $snapshot)" )
-        ;
+	  ("query,q" , po::value<string>() , "query filter, as a JSON string" )
+	  ("csv","export to csv instead of json")
+	  ("out,o", po::value<string>(), "output file; if not specified, stdout is used")
+	  ("s", po::value<string>()->default_value(","),"explicit csv separator/delimitator option")
+	  ("jsonArray", "output to a json array rather than one object per line")
+	  ("slaveOk,k", po::value<bool>()->default_value(true) , "use secondaries for export if available, default true")
+	  ("forceTableScan", "force a table scan (do not use $snapshot)" )
+
+	  ;
         _usesstdout = false;
     }
 
@@ -164,6 +168,8 @@ public:
             return 1;
         }
 
+        auth();
+
         if ( hasParam( "fields" ) || csv ) {
             needFields();
             
@@ -199,12 +205,14 @@ public:
         auto_ptr<DBClientCursor> cursor = conn().query( ns.c_str() , q , 0 , 0 , fieldsToReturn , ( slaveOk ? QueryOption_SlaveOk : 0 ) | QueryOption_NoCursorTimeout );
 
         if ( csv ) {
-            for ( vector<string>::iterator i=_fields.begin(); i != _fields.end(); i++ ) {
-                if ( i != _fields.begin() )
-                    out << ",";
-                out << *i;
-            }
-            out << endl;
+	  for ( vector<string>::iterator i=_fields.begin(); i != _fields.end(); i++ ) {
+	    if ( i != _fields.begin() ){
+	      string sep = getParam("s");
+	      out << sep;
+	    }
+	    out << *i;
+	  }
+	  out << endl;
         }
 
         if (jsonArray)
@@ -216,12 +224,14 @@ public:
             BSONObj obj = cursor->next();
             if ( csv ) {
                 for ( vector<string>::iterator i=_fields.begin(); i != _fields.end(); i++ ) {
-                    if ( i != _fields.begin() )
-                        out << ",";
-                    const BSONElement & e = obj.getFieldDotted(i->c_str());
-                    if ( ! e.eoo() ) {
-                        out << csvString(e);
-                    }
+		  if ( i != _fields.begin() ){
+		    string sep = getParam("s");
+		    out << sep;
+		  }
+		  const BSONElement & e = obj.getFieldDotted(i->c_str());
+		  if ( ! e.eoo() ) {
+		    out << csvString(e);
+		  }
                 }
                 out << endl;
             }
@@ -245,26 +255,8 @@ public:
     }
 };
 
-int toolMain( int argc , char ** argv, char** envp ) {
+int main( int argc , char ** argv, char** envp ) {
     mongo::runGlobalInitializersOrDie(argc, argv, envp);
     Export e;
     return e.main( argc , argv );
 }
-
-#if defined(_WIN32)
-// In Windows, wmain() is an alternate entry point for main(), and receives the same parameters
-// as main() but encoded in Windows Unicode (UTF-16); "wide" 16-bit wchar_t characters.  The
-// WindowsCommandLine object converts these wide character strings to a UTF-8 coded equivalent
-// and makes them available through the argv() and envp() members.  This enables toolMain()
-// to process UTF-8 encoded arguments and environment variables without regard to platform.
-int wmain(int argc, wchar_t* argvW[], wchar_t* envpW[]) {
-    WindowsCommandLine wcl(argc, argvW, envpW);
-    int exitCode = toolMain(argc, wcl.argv(), wcl.envp());
-    ::_exit(exitCode);
-}
-#else
-int main(int argc, char* argv[], char** envp) {
-    int exitCode = toolMain(argc, argv, envp);
-    ::_exit(exitCode);
-}
-#endif
